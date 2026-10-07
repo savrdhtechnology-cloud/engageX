@@ -95,7 +95,7 @@ export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ childre
   const sendEmailViaServer = async (body: Record<string, unknown>) => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) throw new Error('Please sign in to EngageX.');
-    const response = await fetch('/api/engagex-send-email', {
+    const response = await fetch('https://engagex-savrdh-technology.vercel.app/api/engagex-send-email', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
