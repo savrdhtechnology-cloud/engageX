@@ -5,6 +5,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/engageX/crm",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/engageX/assets/:path*",
+      "destination": "/assets/:path*"
+    },
+    {
       "source": "/engageX",
       "destination": "/index.html"
     },
