@@ -5,6 +5,10 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // EngageX is served behind the Savrdh Technologies domain at /engageX.
+    // Keeping the app as a separate Vercel project preserves deployment isolation
+    // while making all generated asset URLs subpath-safe.
+    base: '/engageX/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
