@@ -92,6 +92,21 @@ export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ childre
     if(ticket===generation.current&&wid===workspaceId.current) setWorkspace(data);
   };
   const run = async <T,>(action: () => Promise<T>): Promise<T> => { try {setError('');return await action();} catch(e) {reportError(e);throw e;} };
+  const sendEmailViaServer = async (body: Record<string, unknown>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Please sign in to EngageX.');
+    const response = await fetch('/api/engagex-send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.ok) throw new Error(data?.error || 'Email was not accepted by the provider.');
+    return data;
+  };
   const insert = async (table: typeof tables[number], values: any) => run(async () => {
     const {data,error} = await supabase.from('engagex_'+table).insert({...values,workspace_id:requireWorkspace()}).select().single();
     if(error) throw new Error(error.message);
@@ -225,10 +240,14 @@ export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ childre
           const missing=templateVariables(subject+'\n'+body);
           if(missing.length) throw new Error('Missing template values: '+missing.join(', '));
           const requestId=crypto.randomUUID();
-          const {data,error}=await supabase.functions.invoke('engagex-send-email',{
-            body:{workspace_id:requireWorkspace(),contact_id:contact.id,subject,text:body,request_id:requestId,campaign_id:id}
+          await sendEmailViaServer({
+            workspace_id: requireWorkspace(),
+            contact_id: contact.id,
+            subject,
+            text: body,
+            request_id: requestId,
+            campaign_id: id,
           });
-          if(error || !data?.ok) throw new Error(data?.error||error?.message||'Provider rejected email');
           sent++;
         } catch {
           failed++;
@@ -249,13 +268,14 @@ export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ childre
       const subject=personalizeMessage(payload.subject||'Message from '+brand.companyName,contact,brand),text=renderCompanyMessage(payload.body,contact,brand);
       const missing=templateVariables(subject+'\n'+text);
       if(missing.length) throw new Error('Fill these message values before sending: '+missing.join(', ')+'.');
-      const {data,error}=await supabase.functions.invoke('engagex-send-email',{body:{workspace_id:wid,contact_id:payload.contact_id,subject,text,request_id:payload.request_id||crypto.randomUUID(),campaign_id:payload.campaign_id||null}});
-      if(error) {
-        let message=error.message;
-        if(error.context instanceof Response) { try { message=(await error.context.json()).error||message; } catch {} }
-        throw new Error(message);
-      }
-      if(!data?.ok||!data.id) throw new Error(data?.error||'Email was not accepted by the provider.');
+      await sendEmailViaServer({
+        workspace_id: wid,
+        contact_id: payload.contact_id,
+        subject,
+        text,
+        request_id: payload.request_id || crypto.randomUUID(),
+        campaign_id: payload.campaign_id || null,
+      });
       await refresh('messages'); await refresh('audit_logs');
     }),
     simulateCustomerReply:()=>reportError(new Error('Live replies must arrive through a verified provider webhook.')),
