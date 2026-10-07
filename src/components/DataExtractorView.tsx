@@ -452,12 +452,16 @@ export const DataExtractorView: React.FC = () => {
     const prospectIds = (linkedProspects || []).map((x:any)=>x.id);
 
     if (contactIds.length) {
-      const { error } = await supabase
+      const { data: deletedContacts, error } = await supabase
         .from('engagex_contacts')
         .delete()
         .eq('workspace_id', activeWorkspace.id)
-        .in('id', contactIds);
+        .in('id', contactIds)
+        .select('id');
       if (error) { setNotice(error.message); return; }
+      for (const row of deletedContacts || []) {
+        await deleteEngageXRecordFromMainCrm(activeWorkspace,'contact',row.id);
+      }
     }
 
     if (prospectIds.length) {
