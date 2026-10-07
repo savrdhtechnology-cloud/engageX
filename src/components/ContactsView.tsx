@@ -31,6 +31,7 @@ import { supabase } from '../lib/supabase';
 import { channelReady, contactDirectory, contactPhone, planProspectImport, prospectToContact as mapProspect } from '../lib/contactDirectory';
 import { ContactOutreach } from './ContactOutreach';
 import { DEFAULT_COMPANY_INVITE, renderCompanyMessage, resolveWorkspaceBranding } from '../lib/workspaceBranding';
+import { deleteEngageXRecordFromMainCrm, syncEngageXRecord } from '../lib/mainCrmSync';
 
 const DEFAULT_WHATSAPP_GROUP_LINK = 'https://chat.whatsapp.com/KdCB01biJWTH6ihxLjFO8O';
 const DEFAULT_INVITE_MESSAGE = DEFAULT_COMPANY_INVITE;
@@ -68,18 +69,21 @@ export const ContactsView: React.FC = () => {
     const wid = activeWorkspace.id;
     setQualifyingId(record.id); setError('');
     try {
-      if (kind === 'contact') await updateContact(record.id, { tags: Array.from(new Set([...(record.tags || []), 'qualified'])) });
-      else {
-        const { error, data } = await supabase.from('engagex_prospects').update({ status: 'qualified' }).eq('workspace_id', wid).eq('id', record.id).select('id');
+      if (kind === 'contact') {
+        await updateContact(record.id, { tags: Array.from(new Set([...(record.tags || []), 'qualified'])) });
+      } else {
+        const { error, data } = await supabase
+          .from('engagex_prospects')
+          .update({ status: 'qualified' })
+          .eq('workspace_id', wid)
+          .eq('id', record.id)
+          .select('*')
+          .single();
         if (error) throw new Error(error.message);
-        if (!data?.length) throw new Error('Qualification access denied or prospect not found.');
-        if (syncWorkspaceRef.current === wid) setProspects(prev => prev.map(p => p.id === record.id ? { ...p, status: 'qualified' } : p));
+        await syncEngageXRecord(activeWorkspace,'prospect',data);
+        if (syncWorkspaceRef.current === wid) setProspects(prev => prev.map(p => p.id === record.id ? data : p));
       }
-      const next = await loadHandoffs(wid);
-      if (syncWorkspaceRef.current !== wid) return;
-      const receipt = next[kind + ':' + record.id];
-      if (receipt?.status !== 'synced') throw new Error(receipt?.error || 'Handoff not confirmed. Refresh and retry.');
-      setNotice('Qualified and synced to Savrdh Technology Sales CRM. Lead: ' + receipt.lead_ref);
+      setNotice('Qualified and synced to Savrdh Technology Sales CRM.');
     } catch (e) { if (syncWorkspaceRef.current === wid) setError((e as Error).message); }
     finally { if (syncWorkspaceRef.current === wid) setQualifyingId(''); }
   };
@@ -367,17 +371,26 @@ export const ContactsView: React.FC = () => {
   const deleteSelectedProspects = async () => {
     if (!activeWorkspace?.id || !selectedProspectIds.length) return;
     if (!confirm(`Delete ${selectedProspectIds.length} saved prospect(s)? Linked CRM leads originally created by EngageX will also be removed. Existing Manual / Website / Partner / Direct CRM leads will stay.`)) return;
-    const { error } = await supabase
+
+    const ids = [...selectedProspectIds];
+    const { data: deleted, error } = await supabase
       .from('engagex_prospects')
       .delete()
       .eq('workspace_id', activeWorkspace.id)
-      .in('id', selectedProspectIds);
+      .in('id', ids)
+      .select('id');
+
     if (error) {
       setError(error.message);
       return;
     }
-    setProspects(prev => prev.filter((p:any) => !selectedProspectIds.includes(p.id)));
-    setNotice(`${selectedProspectIds.length} saved prospect(s) deleted.`);
+
+    for (const row of deleted || []) {
+      await deleteEngageXRecordFromMainCrm(activeWorkspace,'prospect',row.id);
+    }
+
+    setProspects(prev => prev.filter((p:any) => !ids.includes(p.id)));
+    setNotice(`${ids.length} saved prospect(s) deleted from EngageX and linked Main CRM records reconciled.`);
     setSelectedProspectIds([]);
   };
 
