@@ -14,7 +14,8 @@ const blank = (): Record<typeof tables[number], any[]> => ({ contacts:[],campaig
 const unavailable = (feature: string): never => { throw new Error(`${feature} is not configured yet. No message, payment or external request was sent.`); };
 
 export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
-  const [currentView, setCurrentView] = useState<AppContextType['currentView']>('landing');
+  const isCrmRoute = typeof window !== 'undefined' && /\/engageX\/crm\/?$/.test(window.location.pathname);
+  const [currentView, setCurrentView] = useState<AppContextType['currentView']>(isCrmRoute ? 'login' : 'landing');
   const [appTab, setAppTab] = useState('dashboard');
   const [activeChatContactId, setActiveChatContactId] = useState('');
   const [userSession, setUserSession] = useState(signedOut);
@@ -70,7 +71,7 @@ export const LiveAppProvider: React.FC<{children: React.ReactNode}> = ({ childre
 
   useEffect(() => {
     let active = true;
-    supabase.auth.getSession().then(({data,error}) => { if (!active) return; if(error) {reportError(error);setLoading(false);} else void loadWorkspace(data.session, !!data.session).catch(() => {}); });
+    supabase.auth.getSession().then(({data,error}) => { if (!active) return; if(error) {reportError(error);setLoading(false);} else if (isCrmRoute) void loadWorkspace(data.session, !!data.session).catch(() => {}); else { setCurrentView('landing'); setLoading(false); } });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       // Do not make awaited Supabase calls inside the auth callback lock.
       if (event === 'SIGNED_OUT') { generation.current++; uid.current=null; workspaceId.current=null; setRecords(blank()); setWorkspace(null); setBilling(emptyBilling); setUserSession(signedOut); setCurrentView('login'); setLoading(false); }
