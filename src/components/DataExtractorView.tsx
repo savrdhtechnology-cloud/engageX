@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 import { contactPhone, contactEmail, planProspectImport, prospectToContact } from '../lib/contactDirectory';
+import { deleteEngageXRecordFromMainCrm, syncEngageXRecord } from '../lib/mainCrmSync';
 
 type SearchHistory = {
   id: string;
@@ -291,9 +292,13 @@ export const DataExtractorView: React.FC = () => {
       const keys=new Set((existing||[]).map(keyOf)); let saved=0;
       for(const prospect of payload) {
         const key=keyOf(prospect); if(keys.has(key)) continue;
-        const {error}=await supabase.from('engagex_prospects').insert(prospect);
+        const {data:created,error}=await supabase.from('engagex_prospects').insert(prospect).select('*').single();
         if(error&&error.code!=='23505') throw new Error(error.message);
-        keys.add(key); if(!error) saved++;
+        keys.add(key);
+        if(!error) {
+          saved++;
+          await syncEngageXRecord(activeWorkspace,'prospect',created);
+        }
       }
       const plan=planProspectImport(payload,contacts);
       const result=await importContacts(plan.items);
@@ -351,7 +356,7 @@ export const DataExtractorView: React.FC = () => {
     e.preventDefault();
     if (!activeWorkspace?.id || !form.business_name.trim()) return;
     setNotice('');
-    const { error } = await supabase.from('engagex_prospects').insert({
+    const { data: created, error } = await supabase.from('engagex_prospects').insert({
       ...form,
       workspace_id: activeWorkspace.id,
       business_name: form.business_name.trim(),
@@ -364,11 +369,12 @@ export const DataExtractorView: React.FC = () => {
       source_url: form.source_url.trim() || null,
       notes: form.notes.trim() || null,
       outreach_eligibility: 'review_required'
-    });
+    }).select('*').single();
     if (error) {
       setNotice(error.code === '23505' ? 'Duplicate prospect skipped.' : error.message);
       return;
     }
+    await syncEngageXRecord(activeWorkspace,'prospect',created);
     setForm({ source: 'manual', business_name: '', category: '', location: '', address: '', phone: '', email: '', website: '', source_url: '', notes: '' });
     setShowAdd(false);
     await load();
@@ -455,12 +461,16 @@ export const DataExtractorView: React.FC = () => {
     }
 
     if (prospectIds.length) {
-      const { error } = await supabase
+      const { data: deletedProspects, error } = await supabase
         .from('engagex_prospects')
         .delete()
         .eq('workspace_id', activeWorkspace.id)
-        .in('id', prospectIds);
+        .in('id', prospectIds)
+        .select('id');
       if (error) { setNotice(error.message); return; }
+      for (const row of deletedProspects || []) {
+        await deleteEngageXRecordFromMainCrm(activeWorkspace,'prospect',row.id);
+      }
     }
 
     const { error: historyError } = await supabase
